@@ -24,6 +24,11 @@ My personal dotfiles configuration for macOS and Linux. This repository contains
 - **Location**: `.tmux.conf`
 - Terminal multiplexer configuration
 
+### Starship Configuration
+- **Location**: `.config/starship.toml`
+- Cross-shell prompt configuration
+- Customizable prompt with git status, language versions, and more
+
 ## Installation
 
 ### Recommended: Using GNU Stow
@@ -60,12 +65,13 @@ sudo pacman -S stow
 2. Reorganize files for stow (one-time setup):
    ```bash
    # Create package directories
-   mkdir -p zsh tmux nvim/.config
+   mkdir -p zsh tmux nvim/.config starship/.config
    
    # Move files to package directories
    mv .zshrc zsh/
    mv .tmux.conf tmux/
    mv .config/nvim nvim/.config/
+   mv .config/starship.toml starship/.config/
    ```
 
 3. Use stow to create symlinks:
@@ -74,12 +80,13 @@ sudo pacman -S stow
    stow -t ~ .
    
    # Or stow specific packages
-   stow -t ~ zsh tmux nvim
+   stow -t ~ zsh tmux nvim starship
    
    # Or stow individually
    stow -t ~ zsh
    stow -t ~ tmux
    stow -t ~ nvim
+   stow -t ~ starship
    ```
 
 4. Reload your shell:
@@ -96,7 +103,7 @@ sudo pacman -S stow
 
 - **Install specific packages:**
   ```bash
-  stow -t ~ zsh tmux nvim
+  stow -t ~ zsh tmux nvim starship
   ```
 
 - **Uninstall a package:**
@@ -117,7 +124,7 @@ sudo pacman -S stow
 **Note:** If you prefer to keep the current repository structure, you can use stow with the `-d` flag to specify the directory:
 ```bash
 # From the dotfiles directory
-stow -d . -t ~ -S zsh -S tmux -S nvim
+stow -d . -t ~ -S zsh -S tmux -S nvim -S starship
 ```
 However, reorganizing into package directories is the recommended approach for cleaner management.
 
@@ -142,6 +149,10 @@ If you prefer not to use GNU Stow, you can manually create symlinks:
    # Neovim
    mkdir -p ~/.config
    ln -s ~/dotfiles/.config/nvim ~/.config/nvim
+   
+   # Starship
+   mkdir -p ~/.config
+   ln -s ~/dotfiles/.config/starship.toml ~/.config/starship.toml
    ```
 
 3. Reload your shell:
@@ -162,6 +173,7 @@ nvim
 - Neovim (v0.8+)
 - Zsh
 - Tmux
+- Starship (optional, for custom prompt)
 - GNU Stow (recommended for installation)
 
 ## License
