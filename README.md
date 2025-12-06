@@ -1,6 +1,6 @@
 # Dotfiles
 
-My personal dotfiles configuration for macOS. This repository contains configuration files for various tools and applications I use in my development workflow.
+My personal dotfiles configuration for macOS and Linux. This repository contains configuration files for various tools and applications I use in my development workflow.
 
 ## Contents
 
@@ -70,7 +70,10 @@ sudo pacman -S stow
 
 3. Use stow to create symlinks:
    ```bash
-   # Stow all packages at once
+   # Stow all packages at once (recommended)
+   stow -t ~ .
+   
+   # Or stow specific packages
    stow -t ~ zsh tmux nvim
    
    # Or stow individually
@@ -86,7 +89,12 @@ sudo pacman -S stow
 
 #### Stow Commands
 
-- **Install all packages:**
+- **Install all packages (recommended):**
+  ```bash
+  stow -t ~ .
+  ```
+
+- **Install specific packages:**
   ```bash
   stow -t ~ zsh tmux nvim
   ```
@@ -150,7 +158,7 @@ nvim
 
 ## Requirements
 
-- macOS (tested on macOS)
+- macOS or Linux
 - Neovim (v0.8+)
 - Zsh
 - Tmux
