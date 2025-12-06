@@ -19,6 +19,14 @@ return {
     dependencies = {
       {
         "williamboman/mason.nvim",
+        config = function(_, opts)
+          -- Set PATH to prioritize Homebrew's Python (3.14) over system Python (3.9.6)
+          -- This ensures Mason can find Python 3.10+ required for tools like pylint
+          local current_path = os.getenv("PATH") or ""
+          vim.env.PATH = "/opt/homebrew/bin:" .. current_path
+          
+          require("mason").setup(opts)
+        end,
         opts = {
           ui = {
             icons = {
@@ -40,7 +48,7 @@ return {
         "stylua", -- lua formatter
         -- "isort", -- python formatter
         "black", -- python formatter
-        -- "pylint",
+        "pylint", -- python linter
         "eslint_d",
       },
     },
