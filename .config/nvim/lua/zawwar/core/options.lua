@@ -17,6 +17,8 @@ opt.wrap = false
 opt.ignorecase = true
 opt.smartcase = true
 
+opt.hlsearch = false -- Disable search highlighting
+
 opt.cursorline = true
 
 opt.termguicolors = true
