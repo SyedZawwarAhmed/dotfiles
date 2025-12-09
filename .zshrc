@@ -21,5 +21,4 @@ export PATH="/Users/applemacbookpro/.antigravity/antigravity/bin:$PATH"
 
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-
+export PATH="$HOME/.local/bin:$PATH"
