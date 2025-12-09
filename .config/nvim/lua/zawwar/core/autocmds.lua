@@ -16,3 +16,10 @@ vim.api.nvim_create_autocmd("FileChangedShellPost", {
 		vim.notify("File changed on disk. Buffer reloaded.", vim.log.levels.WARN)
 	end,
 })
+
+vim.api.nvim_create_autocmd("TextYankPost", {
+	desc = "Highlight on yank",
+	callback = function()
+		vim.highlight.on_yank({ higroup = "IncSearch", timeout = 70 })
+	end,
+})
