@@ -16,11 +16,25 @@ require("lazy").setup({
 	{ import = "zawwar.plugins.lsp" },
 }, {
 	checker = {
-		enabled = true,
-		notify = false,
+		enabled = false, -- don't poll git for plugin updates in the background
 	},
 	change_detection = {
 		enabled = true,
 		notify = false,
+	},
+	performance = {
+		rtp = {
+			-- disable unused built-in runtime plugins for faster startup
+			disabled_plugins = {
+				"gzip",
+				"matchit",
+				"matchparen",
+				"netrwPlugin",
+				"tarPlugin",
+				"tohtml",
+				"tutor",
+				"zipPlugin",
+			},
+		},
 	},
 })

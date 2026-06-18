@@ -1,6 +1,15 @@
 return {
 	"nvim-telescope/telescope.nvim",
 	branch = "master",
+	cmd = "Telescope",
+	keys = {
+		{ "<leader>ff", "<cmd>Telescope find_files<cr>", desc = "Fuzzy find files in cwd" },
+		{ "<leader>fr", "<cmd>Telescope oldfiles<cr>", desc = "Fuzzy find recent files" },
+		{ "<leader>fw", "<cmd>Telescope live_grep<cr>", desc = "Find string in cwd" },
+		{ "<leader>fs", "<cmd>Telescope grep_string<cr>", desc = "Find string under cursor in cwd" },
+		{ "<leader>ft", "<cmd>TodoTelescope<cr>", desc = "Find todos" },
+		{ "<leader>fk", "<cmd>Telescope keymaps<cr>", desc = "Find keymaps" },
+	},
 	dependencies = {
 		"nvim-lua/plenary.nvim",
 		{ "nvim-telescope/telescope-fzf-native.nvim", build = "make" },
@@ -22,10 +31,25 @@ return {
 			end,
 		})
 
+		-- Exclude heavy directories at the ripgrep level so they are never
+		-- scanned, instead of letting them through and filtering in Lua after.
+		local rg_excludes = {
+			"--glob",
+			"!**/.git/*",
+			"--glob",
+			"!**/node_modules/*",
+			"--glob",
+			"!**/.next/*",
+			"--glob",
+			"!**/dist/*",
+			"--glob",
+			"!**/build/*",
+		}
+
 		telescope.setup({
 			defaults = {
 				path_display = { "smart" },
-				file_ignore_patterns = { "%.git/", "node_modules/" },
+				file_ignore_patterns = { "%.git/", "node_modules/", "%.next/", "dist/", "build/" },
 				mappings = {
 					i = {
 						["<C-k>"] = actions.move_selection_previous, -- move to prev result
@@ -37,25 +61,19 @@ return {
 			},
 			pickers = {
 				find_files = {
-					hidden = true, -- show hidden files like .env
-					no_ignore = true, -- include files in .gitignore
+					-- show hidden files (.env) and gitignored files, but skip the
+					-- giant dirs so the picker opens instantly.
+					hidden = true,
+					no_ignore = true,
+					find_command = vim.list_extend({ "rg", "--files", "--hidden", "--no-ignore" }, rg_excludes),
 				},
 				live_grep = {
-					additional_args = { "--hidden", "--no-ignore" }, -- search in hidden files and gitignored files
+					-- search hidden + gitignored files, minus the heavy dirs.
+					additional_args = vim.list_extend({ "--hidden", "--no-ignore" }, rg_excludes),
 				},
 			},
 		})
 
 		telescope.load_extension("fzf")
-
-		-- set keymaps
-		local keymap = vim.keymap -- for conciseness
-
-		keymap.set("n", "<leader>ff", "<cmd>Telescope find_files<cr>", { desc = "Fuzzy find files in cwd" })
-		keymap.set("n", "<leader>fr", "<cmd>Telescope oldfiles<cr>", { desc = "Fuzzy find recent files" })
-		keymap.set("n", "<leader>fw", "<cmd>Telescope live_grep<cr>", { desc = "Find string in cwd" })
-		keymap.set("n", "<leader>fs", "<cmd>Telescope grep_string<cr>", { desc = "Find string under cursor in cwd" })
-		keymap.set("n", "<leader>ft", "<cmd>TodoTelescope<cr>", { desc = "Find todos" })
-		keymap.set("n", "<leader>fk", "<cmd>Telescope keymaps<cr>", { desc = "Find todos" })
 	end,
 }
