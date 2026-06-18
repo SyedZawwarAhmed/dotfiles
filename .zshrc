@@ -22,3 +22,19 @@ export PATH="/Users/applemacbookpro/.antigravity/antigravity/bin:$PATH"
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
 export PATH="$HOME/.local/bin:$PATH"
+
+# Add RVM to PATH for scripting. Make sure this is the last PATH variable change.
+export PATH="$PATH:$HOME/.rvm/bin"
+
+alias sre-local="node /Users/applemacbookpro/Projects/SmythOS/sre/packages/cli/dist/index.cjs"
+
+# pnpm
+export PNPM_HOME="/Users/applemacbookpro/Library/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+# pnpm end
+
+# Run CocoaPods without RVM gem env leaking into Homebrew Ruby (fixes incompatible libruby LoadError)
+alias pod='env -u GEM_HOME -u GEM_PATH pod'
