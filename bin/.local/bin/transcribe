@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# transcribe — local, offline speech-to-text (whisper.cpp + Metal on Apple Silicon).
+# Tuned for English + Urdu. Prints the transcript to stdout; all diagnostics go to stderr.
+set -euo pipefail
+
+VERSION="1.1.1"
+# macOS BSD sed/tr abort with "illegal byte sequence" on Urdu text when the inherited
+# environment has no UTF-8 locale (background jobs, GUI-launched MCP servers).
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LANG="${LANG:-en_US.UTF-8}"
+MODEL_DIR="${WHISPER_MODEL_DIR:-$HOME/.local/share/whisper-models}"
+MODEL_ACCURATE="$MODEL_DIR/ggml-large-v3.bin"
+MODEL_FAST="$MODEL_DIR/ggml-large-v3-turbo-q5_0.bin"
+VAD_MODEL="$MODEL_DIR/ggml-silero-v5.1.2.bin"
+THREADS="${WHISPER_THREADS:-8}"
+
+LANG_OPT="auto"
+MODEL=""
+FORMAT="txt"
+TIMESTAMPS=0
+TRANSLATE=0
+PROMPT=""
+OUT=""
+USE_VAD=1
+NORMALIZE=1
+LANG_FIX=1
+QUIET=0
+WANT_FAST=0
+CARRY_CONTEXT=0
+FILES=()
+
+log()  { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*" >&2; }
+die()  { printf 'transcribe: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat >&2 <<'HELPTEXT'
+transcribe — local offline audio/video -> text (English + Urdu tuned)
+
+USAGE
+  transcribe [options] <file|url> [more files...]
+
+OPTIONS
+  -l, --lang CODE     en | ur | auto   (default: auto, with hi->ur correction)
+  -f, --fast          use the smaller/faster model (English-leaning; less accurate for Urdu)
+  -m, --model PATH    explicit ggml model file
+      --format FMT    txt | json | srt | vtt | csv   (default: txt)
+  -t, --timestamps    include [hh:mm:ss] timestamps in txt output
+      --translate     translate speech into English instead of transcribing verbatim
+      --prompt TEXT   initial prompt: names, jargon, spellings to bias toward
+  -o, --out FILE      write to FILE instead of stdout
+      --no-vad        disable voice-activity detection
+      --raw           skip audio loudness normalization
+      --no-lang-fix   do not remap auto-detected Hindi to Urdu
+      --carry-context keep text context between windows (more fluent, risks
+                      paraphrase and repetition loops on long audio)
+  -q, --quiet         suppress progress output on stderr
+      --check         verify the installation and exit
+  -h, --help          show this help
+  -v, --version       show version
+
+NOTES
+  * Accepts anything ffmpeg reads: .opus .ogg .m4a .mp3 .wav .aac .mp4 .mov, WhatsApp
+    voice notes included. http(s) URLs are downloaded first.
+  * Fully offline after setup. No audio ever leaves this machine.
+  * Exit code 0 = success. Transcript on stdout, progress/errors on stderr.
+
+EXAMPLES
+  transcribe voice-note.opus
+  transcribe --lang ur meeting.m4a
+  transcribe --format json --timestamps interview.mp3
+  transcribe --translate urdu-note.opus        # Urdu speech -> English text
+HELPTEXT
+}
+
+check() {
+  local ok=0
+  printf 'transcribe v%s\n' "$VERSION"
+  for b in whisper-cli ffmpeg; do
+    if command -v "$b" >/dev/null 2>&1; then printf '  [ok]   %s -> %s\n' "$b" "$(command -v $b)"
+    else printf '  [FAIL] %s not found\n' "$b"; ok=1; fi
+  done
+  for m in "$MODEL_ACCURATE:accurate model (large-v3):required" "$MODEL_FAST:fast model (large-v3-turbo):optional" "$VAD_MODEL:VAD model (silero):required"; do
+    local p n tier
+    p="${m%%:*}"; tier="${m##*:}"; n="${m#*:}"; n="${n%:*}"
+    if [ -f "$p" ]; then printf '  [ok]   %s (%s)\n' "$n" "$(du -h "$p" | cut -f1)"
+    elif [ "$tier" = "optional" ]; then printf '  [--]   %s not installed (optional; --fast unavailable)\n' "$n"
+    else printf '  [FAIL] %s missing: %s\n' "$n" "$p"; fi
+  done
+  printf '  threads: %s\n' "$THREADS"
+  return $ok
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -l|--lang)      LANG_OPT="${2:?--lang needs a value}"; shift 2;;
+    -f|--fast)      WANT_FAST=1; shift;;
+    -m|--model)     MODEL="${2:?--model needs a path}"; shift 2;;
+    --format)       FORMAT="${2:?--format needs a value}"; shift 2;;
+    -t|--timestamps) TIMESTAMPS=1; shift;;
+    --translate)    TRANSLATE=1; shift;;
+    --prompt)       PROMPT="${2:?--prompt needs text}"; shift 2;;
+    -o|--out)       OUT="${2:?--out needs a path}"; shift 2;;
+    --no-vad)       USE_VAD=0; shift;;
+    --raw)          NORMALIZE=0; shift;;
+    --no-lang-fix)  LANG_FIX=0; shift;;
+    --carry-context) CARRY_CONTEXT=1; shift;;
+    -q|--quiet)     QUIET=1; shift;;
+    --check)        check; exit $?;;
+    -h|--help)      usage; exit 0;;
+    -v|--version)   echo "$VERSION"; exit 0;;
+    --)             shift; while [ $# -gt 0 ]; do FILES+=("$1"); shift; done;;
+    -*)             die "unknown option: $1 (try --help)";;
+    *)              FILES+=("$1"); shift;;
+  esac
+done
+
+[ ${#FILES[@]} -eq 0 ] && { usage; exit 2; }
+command -v whisper-cli >/dev/null || die "whisper-cli not found. Install with: brew install whisper-cpp"
+command -v ffmpeg      >/dev/null || die "ffmpeg not found. Install with: brew install ffmpeg"
+
+if [ "$WANT_FAST" -eq 1 ] && [ -z "$MODEL" ]; then
+  if [ -f "$MODEL_FAST" ]; then
+    MODEL="$MODEL_FAST"
+  else
+    log "note: --fast model is not installed; using large-v3 instead. To install it:"
+    log "  curl -fL -o \"$MODEL_FAST\" \\"
+    log "    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin"
+  fi
+fi
+[ -z "$MODEL" ] && MODEL="$MODEL_ACCURATE"
+[ -f "$MODEL" ] || die "model not found: $MODEL (run: transcribe --check)"
+case "$FORMAT" in txt|json|srt|vtt|csv) ;; *) die "bad --format: $FORMAT";; esac
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/transcribe.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+
+# Decode the first 30s and ask the model which language it is.
+detect_lang() {
+  local wav="$1" dmodel="$MODEL" out code
+  [ -f "$MODEL_FAST" ] && dmodel="$MODEL_FAST"     # cheaper to load for a detect-only pass
+  out="$(whisper-cli -m "$dmodel" -f "$wav" --detect-language -t "$THREADS" 2>&1 || true)"
+  code="$(printf '%s' "$out" | sed -n 's/.*auto-detected language: \([a-z][a-z]*\).*/\1/p' | tail -1)"
+  [ -z "$code" ] && code="en"
+  # Whisper routinely tags Urdu speech as Hindi — they are acoustically near-identical.
+  # This user's audio is English or Urdu, so hi is always the wrong answer.
+  if [ "$LANG_FIX" -eq 1 ] && [ "$code" = "hi" ]; then
+    log "    detected hi -> using ur (Hindi/Urdu correction; --no-lang-fix to disable)"
+    code="ur"
+  fi
+  printf '%s' "$code"
+}
+
+transcribe_one() {
+  local src="$1" idx="$2"
+  local label="$src"   # separate line: bash expands all words of a `local` before assigning any
+
+  # Fetch remote input.
+  if [[ "$src" =~ ^https?:// ]]; then
+    local dl="$WORK/dl-$idx"
+    log "==> downloading $src"
+    curl -fsSL --retry 3 -o "$dl" "$src" || die "download failed: $src"
+    src="$dl"
+  fi
+  [ -f "$src" ] || die "no such file: $src"
+
+  # whisper.cpp needs 16 kHz mono PCM. Normalization rescues quiet phone voice notes.
+  local wav="$WORK/audio-$idx.wav" af=""
+  [ "$NORMALIZE" -eq 1 ] && af="-af highpass=f=50,loudnorm=I=-16:TP=-1.5:LRA=11"
+  log "==> preparing audio: $label"
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" \
+    $af -ac 1 -ar 16000 -c:a pcm_s16le "$wav" </dev/null \
+    || die "ffmpeg could not decode: $label"
+
+  local lang="$LANG_OPT"
+  if [ "$lang" = "auto" ]; then
+    log "==> detecting language"
+    lang="$(detect_lang "$wav")"
+    log "    language: $lang"
+  fi
+
+  local args=(-m "$MODEL" -f "$wav" -l "$lang" -t "$THREADS" -bs 5 -bo 5 -np)
+  # -mc 0: do not carry decoded text between windows. Whisper's default (-1, unlimited)
+  # lets long recordings drift into paraphrase and self-repeating loops, and a looping
+  # window silently swallows the audio underneath it. Measured on a 6-min Urdu clip:
+  # 96 words with carry-over vs 1021 without.
+  [ "$CARRY_CONTEXT" -eq 1 ] || args+=(-mc 0)
+  [ "$USE_VAD" -eq 1 ] && [ -f "$VAD_MODEL" ] && \
+    args+=(--vad -vm "$VAD_MODEL" -vt 0.25 -vsd 500 -vp 200)
+  [ "$TRANSLATE" -eq 1 ] && args+=(-tr)
+  [ -n "$PROMPT" ] && args+=(--prompt "$PROMPT" --carry-initial-prompt)
+
+  local base="$WORK/out-$idx"
+  log "==> transcribing with $(basename "$MODEL")"
+  case "$FORMAT" in
+    txt)
+      [ "$TIMESTAMPS" -eq 1 ] || args+=(-nt)
+      whisper-cli "${args[@]}" 2>"$WORK/err-$idx" > "$base.raw" \
+        || { cat "$WORK/err-$idx" >&2; die "whisper-cli failed on: $label"; }
+      # Trim leading padding whisper-cli adds to each line, drop blank lines.
+      LC_ALL=C sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$base.raw" \
+        | LC_ALL=C sed '/^$/d' > "$base.txt"
+      # whisper-cli may omit the final newline; without it piped output runs together.
+      if [ -s "$base.txt" ] && [ "$(tail -c1 "$base.txt" | wc -l | tr -d ' ')" -eq 0 ]; then
+        printf '\n' >> "$base.txt"
+      fi
+      cat "$base.txt"
+      ;;
+    json)
+      whisper-cli "${args[@]}" -oj -of "$base" 2>"$WORK/err-$idx" >/dev/null \
+        || { cat "$WORK/err-$idx" >&2; die "whisper-cli failed on: $label"; }
+      LABEL="$label" LANGC="$lang" MODELN="$(basename "$MODEL")" \
+        /usr/bin/python3 - "$base.json" <<'PY'
+import json, os, sys
+raw = json.load(open(sys.argv[1]))
+segs = raw.get("transcription", [])
+def sec(t):
+    o = t.get("offsets", {})
+    return round(o.get("from", 0) / 1000.0, 3), round(o.get("to", 0) / 1000.0, 3)
+out = {
+    "file": os.environ["LABEL"],
+    "language": os.environ["LANGC"],
+    "model": os.environ["MODELN"],
+    "text": " ".join(s.get("text", "").strip() for s in segs).strip(),
+    "segments": [
+        {"start": sec(s)[0], "end": sec(s)[1], "text": s.get("text", "").strip()}
+        for s in segs
+    ],
+}
+out["duration"] = out["segments"][-1]["end"] if out["segments"] else 0
+json.dump(out, sys.stdout, ensure_ascii=False, indent=2)
+print()
+PY
+      ;;
+    srt|vtt|csv)
+      whisper-cli "${args[@]}" "-o${FORMAT}" -of "$base" 2>"$WORK/err-$idx" >/dev/null \
+        || { cat "$WORK/err-$idx" >&2; die "whisper-cli failed on: $label"; }
+      cat "$base.$FORMAT"
+      ;;
+  esac
+}
+
+run_all() {
+  local i=0
+  for f in "${FILES[@]}"; do
+    i=$((i + 1))
+    if [ ${#FILES[@]} -gt 1 ] && [ "$FORMAT" = "txt" ]; then
+      printf '===== %s =====\n' "$f"
+    fi
+    transcribe_one "$f" "$i"
+    [ ${#FILES[@]} -gt 1 ] && [ "$FORMAT" = "txt" ] && printf '\n'
+  done
+  return 0
+}
+
+if [ -n "$OUT" ]; then
+  run_all > "$OUT"
+  log "==> wrote $OUT"
+else
+  run_all
+fi

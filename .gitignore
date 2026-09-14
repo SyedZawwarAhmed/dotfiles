@@ -1,0 +1,16 @@
+# --- credentials: never commit these ---
+**/hosts.yml
+**/auth.json
+**/credentials.json
+**/*.pem
+**/id_rsa*
+**/id_ed25519*
+.env
+.env.*
+
+# --- machine-local, deliberately unmanaged (sanitised copies in templates/) ---
+claude/.claude/settings.json
+codex/.codex/config.toml
+
+# --- noise ---
+.DS_Store

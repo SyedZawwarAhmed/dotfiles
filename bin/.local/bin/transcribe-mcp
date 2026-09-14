@@ -1,0 +1,25 @@
+#!/bin/bash
+# Launcher for the local-transcribe MCP server.
+# GUI apps (Claude Desktop, ChatGPT) start with a minimal PATH, so resolve node ourselves.
+set -euo pipefail
+SERVER="$HOME/.local/share/transcribe-mcp/server.mjs"
+
+find_node() {
+  command -v node 2>/dev/null && return 0
+  for c in /opt/homebrew/bin/node /usr/local/bin/node; do
+    [ -x "$c" ] && { echo "$c"; return 0; }
+  done
+  # newest nvm-managed node
+  local nvm_node
+  nvm_node="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)"
+  [ -n "$nvm_node" ] && [ -x "$nvm_node" ] && { echo "$nvm_node"; return 0; }
+  return 1
+}
+
+NODE="$(find_node)" || { echo "transcribe-mcp: node not found" >&2; exit 1; }
+# whisper-cli and ffmpeg live in Homebrew; make sure the child process can see them.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+# GUI apps launch us with no locale; without this, Urdu output breaks BSD sed downstream.
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LANG="${LANG:-en_US.UTF-8}"
+exec "$NODE" "$SERVER" "$@"

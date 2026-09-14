@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# tmux-window-name — keep the tmux window titled after the current Claude Code chat,
+# with a leading glyph showing what that chat is doing.
+#
+#   ✳ auth-redirect-bug    working
+#   ! auth-redirect-bug    wants your input (permission prompt / question)
+#   ✓ auth-redirect-bug    idle, turn finished
+#
+#   tmux-window-name set "fix auth redirect"   # rename now (what Claude calls)
+#   tmux-window-name state busy|wait|done      # change only the glyph
+#   tmux-window-name status                    # show current name + state
+#   tmux-window-name restore                   # put the old name back
+#   tmux-window-name hook-session-start|hook-prompt|hook-notify|hook-stop|hook-end
+#
+# Env knobs:
+#   CLAUDE_TMUX_ICON        working glyph, default "✳" (set to "" for none)
+#   CLAUDE_TMUX_ICON_WAIT   needs-input glyph, default "!"
+#   CLAUDE_TMUX_ICON_DONE   idle glyph, default "✓"
+#   CLAUDE_TMUX_NOTIFY      on needs-input: os (default, macOS notification) |
+#                           tmux (status-line flash instead) | off
+#   CLAUDE_TMUX_MAXLEN      max name length, default 28
+#   CLAUDE_TMUX_AUTORENAME  "first" (default) or "each" — re-derive on every prompt
+#   CLAUDE_TMUX_KEEP_NAME   1 = don't restore the old name when the session ends
+
+set -uo pipefail
+
+ICON_BUSY="${CLAUDE_TMUX_ICON-✳}"
+ICON_WAIT="${CLAUDE_TMUX_ICON_WAIT-!}"
+ICON_DONE="${CLAUDE_TMUX_ICON_DONE-✓}"
+MAXLEN="${CLAUDE_TMUX_MAXLEN:-28}"
+AUTORENAME="${CLAUDE_TMUX_AUTORENAME:-first}"
+NOTIFY="${CLAUDE_TMUX_NOTIFY:-os}"
+STATE_DIR="${TMPDIR:-/tmp}/claude-tmux-window-name"
+
+usable() { [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; }
+key()    { printf '%s/%s' "$STATE_DIR" "${TMUX_PANE//%/pane}"; }
+glyph()  {
+  case "$1" in
+    wait) printf '%s' "$ICON_WAIT" ;;
+    done) printf '%s' "$ICON_DONE" ;;
+    *)    printf '%s' "$ICON_BUSY" ;;
+  esac
+}
+
+# --- name hygiene: one line, no '#' (tmux format char), hyphenated, length-capped ---
+clean() {
+  printf '%s' "$1" | tr '\n\t' '  ' | tr -d '#' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]][[:space:]]*/-/g' \
+    | cut -c "1-$MAXLEN" | sed -e 's/-*$//'
+}
+
+save_original() {
+  local f; f="$(key).orig"
+  [ -f "$f" ] && return 0
+  mkdir -p "$STATE_DIR"
+  {
+    tmux display-message -p -t "$TMUX_PANE" '#W'
+    tmux show-window-options -v -t "$TMUX_PANE" automatic-rename 2>/dev/null || echo on
+    tmux show-window-options -v -t "$TMUX_PANE" allow-rename 2>/dev/null || echo off
+  } > "$f" 2>/dev/null
+}
+
+# the name without any of our glyphs — falls back to whatever tmux shows now
+base_name() {
+  local f cur g; f="$(key).named"
+  if [ -s "$f" ]; then cat "$f"; return 0; fi
+  cur="$(tmux display-message -p -t "$TMUX_PANE" '#W' 2>/dev/null)"
+  for g in "$ICON_BUSY" "$ICON_WAIT" "$ICON_DONE"; do
+    [ -n "$g" ] && case "$cur" in "$g "*) cur="${cur#"$g" }" ;; esac
+  done
+  printf '%s' "$cur"
+}
+
+# paint "<glyph> <base>" onto the window
+render() {
+  local st base name
+  st="$(cat "$(key).state" 2>/dev/null || echo busy)"
+  base="$(base_name)"
+  [ -n "$base" ] || return 0
+  name="$(glyph "$st")"
+  [ -n "$name" ] && name="$name $base" || name="$base"
+  save_original
+  # stop the shell and the TUI's title escapes from clobbering us
+  tmux set-window-option -t "$TMUX_PANE" automatic-rename off >/dev/null 2>&1
+  tmux set-window-option -t "$TMUX_PANE" allow-rename off >/dev/null 2>&1
+  tmux rename-window -t "$TMUX_PANE" "$name" >/dev/null 2>&1
+}
+
+apply() {
+  local name; name="$(clean "${1:-}")"
+  [ -n "$name" ] || return 0
+  usable || return 0
+  tmux display-message -p -t "$TMUX_PANE" '#W' >/dev/null 2>&1 || return 0
+  mkdir -p "$STATE_DIR"
+  printf '%s' "$name" > "$(key).named"
+  render
+}
+
+set_state() {
+  usable || return 0
+  mkdir -p "$STATE_DIR"
+  printf '%s' "$1" > "$(key).state"
+  render
+}
+
+# needs-input alert: a macOS notification, plus a window bell so tmux flags the
+# window in the status bar. CLAUDE_TMUX_NOTIFY=tmux swaps the banner for a
+# status-line flash; =off silences both.
+notify() {
+  local msg base tty
+  base="$(base_name)"
+  msg="$(printf '%s' "$1" | tr -d '"\\`$' | tr '\n' ' ' | cut -c 1-120)"
+  case "$NOTIFY" in
+    off)  return 0 ;;
+    tmux) tmux display-message -d 4000 "[$base] $msg" >/dev/null 2>&1 ;;
+    *)    if command -v osascript >/dev/null 2>&1; then
+            osascript -e "display notification \"$msg\" with title \"Claude Code\" subtitle \"$base\"" >/dev/null 2>&1
+          else
+            tmux display-message -d 4000 "[$base] $msg" >/dev/null 2>&1
+          fi ;;
+  esac
+  # a BEL in the pane makes tmux flag the window in the status bar of other windows
+  tty="$(tmux display-message -p -t "$TMUX_PANE" '#{pane_tty}' 2>/dev/null)"
+  [ -n "$tty" ] && [ -w "$tty" ] && printf '\a' > "$tty" 2>/dev/null
+  return 0
+}
+
+restore() {
+  usable || return 0
+  local f; f="$(key).orig"
+  [ -f "$f" ] || return 0
+  local orig auto allow
+  orig="$(sed -n 1p "$f")"; auto="$(sed -n 2p "$f")"; allow="$(sed -n 3p "$f")"
+  [ -n "$orig" ] && tmux rename-window -t "$TMUX_PANE" "$orig" >/dev/null 2>&1
+  tmux set-window-option -t "$TMUX_PANE" automatic-rename "${auto:-on}" >/dev/null 2>&1
+  tmux set-window-option -t "$TMUX_PANE" allow-rename "${allow:-off}" >/dev/null 2>&1
+  rm -f "$(key).orig" "$(key).named" "$(key).state" \
+        "$(key).claimed" "$(key).hinted" "$(key).session"
+}
+
+# --- hook plumbing: read the JSON Claude Code pipes in, pull out a field ---
+read_hook_input() { HOOK_JSON="$(cat)"; }
+field() {
+  printf '%s' "$HOOK_JSON" | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+v=d.get(sys.argv[1],"")
+print(v if isinstance(v,str) else "")
+' "$1" 2>/dev/null
+}
+
+# first few load-bearing words of the prompt -> "fix-auth-redirect"
+slug_from_prompt() {
+  printf '%s' "$1" | python3 -c '
+import re,sys
+t=sys.stdin.read().lower()
+t=re.sub(r"```.*?```"," ",t,flags=re.S)          # drop pasted code
+t=re.sub(r"<[^>]+>"," ",t)                        # drop tags/reminders
+t=re.split(r"[.?!\n]",t.strip())[0]               # first sentence only
+t=re.sub(r"^\s*(hey|hi|ok|okay|so|now|also|actually)\b[, ]*","",t)
+t=re.sub(r"^\s*(can|could|would|will) (you|u)\b","",t)
+t=re.sub(r"^\s*(please|pls|lets|let us|let’s|i want to|i need to|i would like to|help me|we need to|we should)\b","",t)
+stop=set("a an the to for of in on at by with from and or but so if then that this these those it its is are was were be been being do does did done my me we us you your our their his her they them there here as not no just really very much some any all more most other another new some can could would should will shall may might must have has had get got make makes made use using used please help thanks thank now also actually about into over under again still yet".split())
+words=[w for w in re.findall(r"[a-z0-9][a-z0-9._+/-]*",t) if w not in stop and len(w)>1]
+print("-".join(words[:4]))
+' 2>/dev/null
+}
+
+emit_context() {
+  python3 -c '
+import json,sys
+print(json.dumps({"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":sys.argv[1]}}))
+' "$1"
+}
+
+HINT='[tmux] This chat runs in a tmux window whose name is a placeholder. Once you know what this conversation is actually about, run once, silently, with no commentary:
+  tmux-window-name set "<2-4 word topic>"
+Topic, not action — "auth redirect bug", "grove pipeline schema". Re-run it only if the subject genuinely changes.'
+
+cmd="${1:-status}"; shift 2>/dev/null || true
+
+case "$cmd" in
+  set)
+    usable || { echo "not inside tmux — nothing to rename" >&2; exit 0; }
+    apply "${*:-}"
+    touch "$(key).claimed"
+    echo "window renamed: $(tmux display-message -p -t "$TMUX_PANE" '#W')"
+    ;;
+
+  state)
+    set_state "${1:-busy}"
+    ;;
+
+  hook-session-start)
+    usable || exit 0
+    read_hook_input
+    sid="$(field session_id)"; cwd="$(field cwd)"; [ -n "$cwd" ] || cwd="$PWD"
+    prev=""; [ -f "$(key).session" ] && prev="$(cat "$(key).session")"
+    if [ "$sid" != "$prev" ]; then           # genuinely new chat in this pane
+      rm -f "$(key).claimed" "$(key).hinted" "$(key).named"
+      mkdir -p "$STATE_DIR"; printf '%s' "$sid" > "$(key).session"
+      printf 'busy' > "$(key).state"
+      apply "$(basename "$cwd")"
+    fi
+    exit 0
+    ;;
+
+  hook-prompt)
+    usable || exit 0
+    read_hook_input
+    prompt="$(field prompt)"
+    [ -n "$prompt" ] || exit 0
+    mkdir -p "$STATE_DIR"
+    printf 'busy' > "$(key).state"           # a new prompt means work resumed
+    if [ ! -f "$(key).claimed" ] && { [ ! -f "$(key).hinted" ] || [ "$AUTORENAME" = each ]; }; then
+      slug="$(slug_from_prompt "$prompt")"
+      [ -n "$slug" ] && apply "$slug"
+    fi
+    render
+    if [ ! -f "$(key).hinted" ]; then        # nudge Claude to pick a better name, once
+      touch "$(key).hinted"
+      emit_context "$HINT"
+    fi
+    exit 0
+    ;;
+
+  hook-notify)
+    usable || exit 0
+    read_hook_input
+    msg="$(field message)"; [ -n "$msg" ] || msg="Claude needs your input"
+    set_state wait
+    notify "$msg"
+    exit 0
+    ;;
+
+  hook-stop)
+    usable || exit 0
+    set_state done
+    exit 0
+    ;;
+
+  hook-end)
+    [ "${CLAUDE_TMUX_KEEP_NAME:-0}" = 1 ] && exit 0
+    restore
+    exit 0
+    ;;
+
+  restore) restore ;;
+
+  status)
+    if usable; then
+      echo "pane:    $TMUX_PANE"
+      echo "window:  $(tmux display-message -p -t "$TMUX_PANE" '#W' 2>/dev/null)"
+      echo "base:    $(base_name)"
+      echo "state:   $(cat "$(key).state" 2>/dev/null || echo 'busy (default)')"
+      echo "original:$( [ -f "$(key).orig" ] && sed -n 1p "$(key).orig" || echo ' (not captured)')"
+      echo "claimed: $( [ -f "$(key).claimed" ] && echo 'yes (Claude named it)' || echo 'no (auto-derived)')"
+    else
+      echo "not inside tmux"
+    fi
+    ;;
+
+  *) sed -n '2,26p' "$0"; exit 1 ;;
+esac

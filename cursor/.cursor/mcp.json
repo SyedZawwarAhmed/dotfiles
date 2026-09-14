@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "local-transcribe": {
+      "command": "/Users/applemacbookpro/.local/bin/transcribe-mcp",
+      "args": []
+    }
+  }
+}

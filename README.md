@@ -1,186 +1,75 @@
 # Dotfiles
 
-My personal dotfiles configuration for macOS and Linux. This repository contains configuration files for various tools and applications I use in my development workflow.
+Personal macOS/Linux configuration, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
-## Contents
+Each top-level directory is a **stow package** whose internal layout mirrors `$HOME`.
+Stowing `zsh` creates `~/.zshrc -> dotfiles/zsh/.zshrc`.
 
-### Neovim Configuration
-- **Location**: `.config/nvim/`
-- Modern Neovim setup with Lua configuration
-- Includes plugins for:
-  - LSP (Language Server Protocol) support
-  - Auto-completion (nvim-cmp)
-  - File navigation (Telescope, Neo-tree)
-  - Formatting and linting
-  - Git integration (gitsigns)
-  - Session management (auto-sessions)
-  - And more...
+## Install
 
-### Zsh Configuration
-- **Location**: `.zshrc`
-- Custom shell configuration and aliases
-
-### Tmux Configuration
-- **Location**: `.tmux.conf`
-- Terminal multiplexer configuration
-
-### Starship Configuration
-- **Location**: `.config/starship.toml`
-- Cross-shell prompt configuration
-- Customizable prompt with git status, language versions, and more
-
-## Installation
-
-### Recommended: Using GNU Stow
-
-[GNU Stow](https://www.gnu.org/software/stow/) is a symlink farm manager that makes managing dotfiles easier. It automatically creates the necessary directory structure and symlinks. This is the recommended installation method.
-
-#### Install GNU Stow
-
-**Using Homebrew (macOS):**
 ```bash
+git clone git@github.com:SyedZawwarAhmed/dotfiles.git ~/dotfiles
+cd ~/dotfiles
 brew install stow
+./install.sh                 # all packages
+./install.sh zsh nvim        # just some
+./install.sh -D              # unstow everything
 ```
 
-**Using package manager (Linux):**
-```bash
-# Debian/Ubuntu
-sudo apt-get install stow
+Then `brew bundle install --global` to install the recorded packages (it reads `~/.Brewfile`),
+and `source ~/.zshrc`.
 
-# Fedora/RHEL
-sudo dnf install stow
+## Packages
 
-# Arch Linux
-sudo pacman -S stow
-```
+| Package | Links to | Contents |
+|---|---|---|
+| `zsh` | `~/.zshrc` | shell config, aliases, PATH |
+| `tmux` | `~/.tmux.conf` | tmux + tpm plugin config |
+| `nvim` | `~/.config/nvim/` | Neovim (lazy.nvim, LSP, Telescope, Neo-tree) |
+| `starship` | `~/.config/starship.toml` | prompt |
+| `ghostty` | `~/.config/ghostty/` | terminal |
+| `git` | `~/.gitconfig`, `~/.config/git/ignore` | identity + global ignore |
+| `gh` | `~/.config/gh/config.yml` | GitHub CLI prefs and aliases |
+| `bin` | `~/.local/bin/` | `transcribe`, `transcribe-mcp`, `cursor` |
+| `claude` | `~/.claude/` | `CLAUDE.md` + hand-written skills |
+| `codex` | `~/.codex/AGENTS.md` | symlink to `CLAUDE.md` |
+| `gemini` | `~/.gemini/GEMINI.md` | symlink to `CLAUDE.md` |
+| `cursor` | `~/.cursor/mcp.json` | Cursor CLI MCP servers |
+| `vscode` | `~/Library/.../Code/User/` | VS Code settings |
+| `cursor-app` | `~/Library/.../Cursor/User/` | Cursor GUI settings + keybindings |
+| `brew` | `~/.Brewfile` | `brew bundle` manifest |
 
-#### Setup with Stow
+### Agent instructions are shared
 
-1. Clone this repository:
-   ```bash
-   git clone git@github.com:SyedZawwarAhmed/dotfiles.git ~/dotfiles
-   cd ~/dotfiles
-   ```
+`claude/.claude/CLAUDE.md` is the single source of truth. `codex/.codex/AGENTS.md` and
+`gemini/.gemini/GEMINI.md` are symlinks to it, so all three assistants stay in sync.
+Edit the Claude one.
 
-2. Reorganize files for stow (one-time setup):
-   ```bash
-   # Create package directories
-   mkdir -p zsh tmux nvim/.config starship/.config
-   
-   # Move files to package directories
-   mv .zshrc zsh/
-   mv .tmux.conf tmux/
-   mv .config/nvim nvim/.config/
-   mv .config/starship.toml starship/.config/
-   ```
+### Hand-written Claude skills
 
-3. Use stow to create symlinks:
-   ```bash
-   # Stow all packages at once (recommended)
-   stow -t ~ .
-   
-   # Or stow specific packages
-   stow -t ~ zsh tmux nvim starship
-   
-   # Or stow individually
-   stow -t ~ zsh
-   stow -t ~ tmux
-   stow -t ~ nvim
-   stow -t ~ starship
-   ```
+`claude/.claude/skills/` tracks only the four skills written by hand — `owasp`,
+`tmux-window-name`, `transcribe-audio`, `unslop`. The rest of `~/.claude/skills/` are
+symlinks into `~/.agents/skills/` (installed from elsewhere) and are not tracked here.
 
-4. Reload your shell:
-   ```bash
-   source ~/.zshrc
-   ```
+## Deliberately not tracked
 
-#### Stow Commands
+This repository is **public**, so two configs stay machine-local. Sanitised copies live in
+`templates/` for reference, and `.gitignore` blocks the real ones:
 
-- **Install all packages (recommended):**
-  ```bash
-  stow -t ~ .
-  ```
+- **`~/.claude/settings.json`** — its `autoMode.environment` block records work-specific
+  infrastructure. `templates/claude-settings.json` has that block stripped and keeps the
+  prefs and tmux hooks.
+- **`~/.codex/config.toml`** — contains an API key and ~28 per-project history blocks.
+  `templates/codex-config.toml` is redacted.
 
-- **Install specific packages:**
-  ```bash
-  stow -t ~ zsh tmux nvim starship
-  ```
-
-- **Uninstall a package:**
-  ```bash
-  stow -D -t ~ zsh
-  ```
-
-- **Restow (recreate symlinks):**
-  ```bash
-  stow -R -t ~ zsh
-  ```
-
-- **Check what stow would do (dry run):**
-  ```bash
-  stow -n -t ~ zsh
-  ```
-
-**Note:** If you prefer to keep the current repository structure, you can use stow with the `-d` flag to specify the directory:
-```bash
-# From the dotfiles directory
-stow -d . -t ~ -S zsh -S tmux -S nvim -S starship
-```
-However, reorganizing into package directories is the recommended approach for cleaner management.
-
-### Alternative: Manual Symlinks
-
-If you prefer not to use GNU Stow, you can manually create symlinks:
-
-1. Clone this repository:
-   ```bash
-   git clone git@github.com:SyedZawwarAhmed/dotfiles.git ~/dotfiles
-   cd ~/dotfiles
-   ```
-
-2. Create symlinks to your home directory:
-   ```bash
-   # Zsh
-   ln -s ~/dotfiles/.zshrc ~/.zshrc
-   
-   # Tmux
-   ln -s ~/dotfiles/.tmux.conf ~/.tmux.conf
-   
-   # Neovim
-   mkdir -p ~/.config
-   ln -s ~/dotfiles/.config/nvim ~/.config/nvim
-   
-   # Starship
-   mkdir -p ~/.config
-   ln -s ~/dotfiles/.config/starship.toml ~/.config/starship.toml
-   ```
-
-3. Reload your shell:
-   ```bash
-   source ~/.zshrc
-   ```
-
-### Neovim Setup
-
-After symlinking the Neovim config, start Neovim and it will automatically install the plugins:
-```bash
-nvim
-```
+Also excluded: `~/.config/gh/hosts.yml`, `~/.codex/auth.json` (auth tokens),
+`~/.tmux/plugins/` (tpm-managed), and the RVM-generated `.bashrc` / `.profile` / `.mkshrc`
+/ `.zlogin` stubs.
 
 ## Requirements
 
-- macOS or Linux
-- Neovim (v0.8+)
-- Zsh
-- Tmux
-- Starship (optional, for custom prompt)
-- GNU Stow (recommended for installation)
-
-## License
-
-This repository is for personal use. Feel free to take inspiration from it for your own dotfiles.
+macOS or Linux · GNU Stow · Zsh · Neovim v0.8+ · Tmux · Starship (optional)
 
 ## Author
 
 Syed Zawwar Ahmed
-
