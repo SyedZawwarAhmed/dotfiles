@@ -34,6 +34,26 @@ while they are mid-call or deciding something.
 - Written deliverables (tickets, PRDs, docs) follow the same instinct: under 1000 words
   unless asked otherwise.
 
+## Testing steps
+
+Whenever I ask for steps to test something, in any project, give them like this. It is
+the standard every time, and the length rules above do not shorten it.
+
+- **Check the real state first.** Query the data, the running app or the code so the
+  steps name the actual record, the actual numbers and the actual URL. Never write "a
+  record", "some value" or "the total"; write the record's real name and the real
+  figures.
+- **One action per numbered step**, in the order I will do it: where to go, what to
+  click, the exact value to type. Name buttons and fields by their on-screen label in
+  bold.
+- **Put the expected result straight after the step that produces it**, with the exact
+  text, number or label I should see (the message wording, the figure the field
+  shows), including what should *not* happen.
+- **Include the negative case** (the refused value, the warning, the field snapping
+  back), not only the happy path.
+- Open with one line of context only if it changes how I read the steps (what the
+  current data already holds). No preamble, no closing summary.
+
 ## Writing style
 
 The `unslop` rules apply to everything I write, always, without being invoked: chat
